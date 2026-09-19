@@ -518,6 +518,12 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
      */
     @Input({ transform: booleanAttribute }) resetPageOnSort: boolean = true;
     /**
+     * When enabled, a third click on a sortable column removes the sorting and restores the original data order.
+     * @defaultValue false
+     * @group Props
+     */
+    removableSort = input(false, { transform: booleanAttribute });
+    /**
      * Specifies the selection mode, valid values are "single" and "multiple".
      * @group Props
      */
@@ -1185,6 +1191,9 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
 
     _sortOrder: number = 1;
 
+    /** Original row order, captured when value changes and removableSort is enabled. */
+    _pristineValue: RowData[] | null = null;
+
     preventSelectionSetterPropagation: boolean | undefined;
 
     _selection: any;
@@ -1414,6 +1423,7 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
             }
 
             this._value = simpleChange.value.currentValue;
+            this._pristineValue = this.removableSort() && !this.lazy ? [...(this._value ?? [])] : null;
 
             if (!this.lazy) {
                 this.totalRecords = this._totalRecords === 0 && this._value ? this._value.length : (this._totalRecords ?? 0);
@@ -1575,8 +1585,13 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
         let originalEvent = event.originalEvent;
 
         if (this.sortMode === 'single') {
-            this._sortOrder = this.sortField === event.field ? this.sortOrder * -1 : this.defaultSortOrder;
-            this._sortField = event.field;
+            if (this.removableSort() && this.sortField === event.field && this.sortOrder === this.defaultSortOrder * -1) {
+                this._sortField = null;
+                this._sortOrder = this.defaultSortOrder;
+            } else {
+                this._sortOrder = this.sortField === event.field ? this.sortOrder * -1 : this.defaultSortOrder;
+                this._sortField = event.field;
+            }
 
             if (this.resetPageOnSort) {
                 this._first = 0;
@@ -1593,14 +1608,18 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
             let metaKey = (<KeyboardEvent>originalEvent).metaKey || (<KeyboardEvent>originalEvent).ctrlKey;
             let sortMeta = this.getSortMeta(<string>event.field);
 
+            const removeSort = this.removableSort() && sortMeta?.order === this.defaultSortOrder * -1;
+
             if (sortMeta) {
                 if (!metaKey) {
-                    this._multiSortMeta = [
-                        {
-                            field: <string>event.field,
-                            order: sortMeta.order * -1
-                        }
-                    ];
+                    this._multiSortMeta = removeSort
+                        ? []
+                        : [
+                              {
+                                  field: <string>event.field,
+                                  order: sortMeta.order * -1
+                              }
+                          ];
 
                     if (this.resetPageOnSort) {
                         this._first = 0;
@@ -1610,6 +1629,8 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
                             this.resetScrollTop();
                         }
                     }
+                } else if (removeSort) {
+                    this._multiSortMeta = (<SortMeta[]>this._multiSortMeta).filter((meta) => meta.field !== event.field);
                 } else {
                     sortMeta.order = sortMeta.order * -1;
                 }
@@ -1638,12 +1659,37 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
         this.anchorRowIndex = null;
     }
 
+    /**
+     * Restores the original data order when the sorting has been removed through removableSort.
+     */
+    private restoreSortOrder() {
+        this.restoringSort = false;
+
+        if (this.lazy) {
+            this.onLazyLoad.emit(this.createLazyLoadMetadata());
+        } else if (this._pristineValue) {
+            this._value = [...this._pristineValue];
+
+            if (this.hasFilter()) {
+                this._filter();
+            }
+        }
+
+        this.onSort.emit(this.sortMode === 'multiple' ? { multisortmeta: [] } : { field: null, order: null });
+        this.tableService.onSort(null);
+    }
+
     sortSingle() {
         let field = this.sortField || this.groupRowsBy;
         let order = this.sortField ? this.sortOrder : this.groupRowsByOrder;
         if (this.groupRowsBy && this.sortField && this.groupRowsBy !== this.sortField) {
             this._multiSortMeta = [this.getGroupRowsMeta(), { field: this.sortField, order: this.sortOrder }];
             this.sortMultiple();
+            return;
+        }
+
+        if (this.removableSort() && !field) {
+            this.restoreSortOrder();
             return;
         }
 
@@ -1700,6 +1746,12 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
             if (!this._multiSortMeta || !this._multiSortMeta.length) this._multiSortMeta = [this.getGroupRowsMeta()];
             else if (this._multiSortMeta[0].field !== this.groupRowsBy) this._multiSortMeta = [this.getGroupRowsMeta(), ...this._multiSortMeta];
         }
+
+        if (this.removableSort() && !this.multiSortMeta?.length) {
+            this.restoreSortOrder();
+            return;
+        }
+
         if (this.multiSortMeta && this.multiSortMeta.length > 0) {
             if (this.lazy) {
                 this.onLazyLoad.emit(this.createLazyLoadMetadata());
@@ -2400,6 +2452,11 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
         this._sortField = null;
         this._sortOrder = this.defaultSortOrder;
         this._multiSortMeta = null;
+
+        if (this.removableSort() && this._pristineValue) {
+            this._value = [...this._pristineValue];
+        }
+
         this.tableService.onSort(null);
 
         this.clearFilterValues();
