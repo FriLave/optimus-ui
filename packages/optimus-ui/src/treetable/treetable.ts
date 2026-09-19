@@ -1111,6 +1111,10 @@ export class TreeTable extends BaseComponent<TreeTablePassThrough> implements Bl
             this.tableService.onUIUpdate(this.value);
         }
 
+        if (simpleChange.removableSort && !simpleChange.value) {
+            this.capturePristineNodes();
+        }
+
         if (simpleChange.sortField) {
             this._sortField = simpleChange.sortField.currentValue;
 
@@ -1264,6 +1268,10 @@ export class TreeTable extends BaseComponent<TreeTablePassThrough> implements Bl
                     }
                 } else if (removeSort) {
                     this._multiSortMeta = (<SortMeta[]>this._multiSortMeta).filter((meta) => meta.field !== event.field);
+                    if (!this.lazy && this._pristineNodes && this._multiSortMeta.length) {
+                        this.restorePristineNodes(this._pristineNodes);
+                        this._value = [...this._pristineNodes];
+                    }
                 } else {
                     sortMeta.order = sortMeta.order * -1;
                 }
@@ -2421,10 +2429,10 @@ export class TreeTable extends BaseComponent<TreeTablePassThrough> implements Bl
         this._sortOrder = 1;
         this._multiSortMeta = null;
 
-        if (this.removableSort() && this._pristineNodes) {
-            this.restorePristineNodes(this._pristineNodes);
-            this._value = [...this._pristineNodes];
-            this.updateSerializedValue();
+        const restoredPristine = this.removableSort() && !!this._pristineNodes;
+        if (restoredPristine) {
+            this.restorePristineNodes(this._pristineNodes!);
+            this._value = [...this._pristineNodes!];
         }
 
         this.tableService.onSort(null);
@@ -2433,6 +2441,10 @@ export class TreeTable extends BaseComponent<TreeTablePassThrough> implements Bl
         this.filters = {};
 
         this.first = 0;
+
+        if (restoredPristine) {
+            this.updateSerializedValue();
+        }
 
         if (this.lazy) {
             this.onLazyLoad.emit(this.createLazyLoadMetadata());

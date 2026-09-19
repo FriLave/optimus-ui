@@ -1438,6 +1438,13 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
             this.tableService.onValueChange(simpleChange.value.currentValue);
         }
 
+        if (simpleChange.removableSort && !simpleChange.value) {
+            const isEnabling = simpleChange.removableSort.currentValue && !simpleChange.removableSort.previousValue;
+            if (isEnabling && !this.lazy) {
+                this._pristineValue = [...(this._value ?? [])];
+            }
+        }
+
         if (simpleChange.columns) {
             if (!this.isStateful()) {
                 this._columns = simpleChange.columns.currentValue;
@@ -1631,6 +1638,9 @@ export class Table<RowData = any> extends BaseComponent<TablePassThrough> implem
                     }
                 } else if (removeSort) {
                     this._multiSortMeta = (<SortMeta[]>this._multiSortMeta).filter((meta) => meta.field !== event.field);
+                    if (!this.lazy && this._pristineValue && this._multiSortMeta.length) {
+                        this._value = [...this._pristineValue];
+                    }
                 } else {
                     sortMeta.order = sortMeta.order * -1;
                 }
